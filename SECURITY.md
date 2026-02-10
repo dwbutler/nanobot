@@ -55,14 +55,16 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- Empty `allowFrom` list will **ALLOW ALL** users (open by default for personal use)
+- Empty `allowFrom` list will **DENY ALL** users by default
+- Set `allowAll: true` only when you intentionally want public access
 - Get your Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
 - Review access logs regularly for unauthorized access attempts
 
 ### 3. Shell Command Execution
 
-The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
+The `exec` tool can execute shell commands and is **disabled by default** (`tools.exec.enabled=false`).
+If you enable it, dangerous command patterns are blocked, and you should:
 
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
@@ -72,11 +74,16 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ❌ Don't run on systems with sensitive data without careful review
 
 **Blocked patterns:**
+- `sudo`, `doas`, `pkexec`, `su` - Privilege escalation / user switching
 - `rm -rf /` - Root filesystem deletion
 - Fork bombs
 - Filesystem formatting (`mkfs.*`)
 - Raw disk writes
 - Other destructive operations
+
+You can customize command policy via:
+- `tools.exec.denyPatterns` (regex blacklist)
+- `tools.exec.allowPatterns` (regex allowlist, optional)
 
 ### 4. File System Access
 
@@ -95,7 +102,8 @@ File operations have path traversal protection, but:
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp Bridge:**
-- The bridge runs on `localhost:3001` by default
+- The bridge binds to `127.0.0.1:3001` by default
+- Set `BRIDGE_TOKEN` and `channels.whatsapp.bridgeToken` to authenticate websocket clients
 - If exposing to network, use proper authentication and TLS
 - Keep authentication data in `~/.nanobot/whatsapp-auth` secure (mode 0700)
 
@@ -214,7 +222,7 @@ If you suspect a security breach:
 ✅ **Authentication**
 - Allow-list based access control
 - Failed authentication attempt logging
-- Open by default (configure allowFrom for production use)
+- Deny-by-default access when `allowFrom` is empty (unless `allowAll=true`)
 
 ✅ **Resource Protection**
 - Command execution timeouts (60s default)
@@ -253,7 +261,7 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-10
 
 For the latest security updates and announcements, check:
 - GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories

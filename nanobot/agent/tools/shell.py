@@ -9,6 +9,15 @@ from typing import Any
 from nanobot.agent.tools.base import Tool
 
 
+def _is_within(path: Path, base: Path) -> bool:
+    """Return True if path is inside (or equal to) base."""
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
+
+
 class ExecTool(Tool):
     """Tool to execute shell commands."""
     
@@ -22,7 +31,12 @@ class ExecTool(Tool):
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self._base_dir = Path(working_dir or os.getcwd()).expanduser().resolve()
         self.deny_patterns = deny_patterns or [
+            r"\bsudo\b",                     # privilege escalation
+            r"\bdoas\b",                     # privilege escalation
+            r"\bpkexec\b",                   # privilege escalation
+            r"\bsu\b(?:\s|$)",               # user switching
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
@@ -61,8 +75,15 @@ class ExecTool(Tool):
         }
     
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
-        cwd = working_dir or self.working_dir or os.getcwd()
-        guard_error = self._guard_command(command, cwd)
+        requested_cwd = Path(working_dir or self.working_dir or os.getcwd()).expanduser().resolve()
+
+        if self.restrict_to_workspace and not _is_within(requested_cwd, self._base_dir):
+            return (
+                "Error: Command blocked by safety guard "
+                "(working_dir outside workspace)"
+            )
+
+        guard_error = self._guard_command(command, requested_cwd)
         if guard_error:
             return guard_error
         
@@ -71,7 +92,7 @@ class ExecTool(Tool):
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+                cwd=str(requested_cwd),
             )
             
             try:
@@ -108,7 +129,7 @@ class ExecTool(Tool):
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
-    def _guard_command(self, command: str, cwd: str) -> str | None:
+    def _guard_command(self, command: str, cwd: Path) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
@@ -125,7 +146,8 @@ class ExecTool(Tool):
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
-            cwd_path = Path(cwd).resolve()
+            # Never trust caller-provided cwd as a restriction root.
+            workspace_root = self._base_dir
 
             win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
             # Only match absolute paths — avoid false positives on relative
@@ -138,7 +160,7 @@ class ExecTool(Tool):
                     p = Path(raw.strip()).resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
-                    return "Error: Command blocked by safety guard (path outside working dir)"
+                if p.is_absolute() and not _is_within(p, workspace_root):
+                    return "Error: Command blocked by safety guard (path outside workspace)"
 
         return None

@@ -3,7 +3,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
-import { WhatsAppClient, InboundMessage } from './whatsapp.js';
+import { WhatsAppClient } from './whatsapp.js';
 
 interface SendCommand {
   type: 'send';
@@ -21,12 +21,20 @@ export class BridgeServer {
   private wa: WhatsAppClient | null = null;
   private clients: Set<WebSocket> = new Set();
 
-  constructor(private port: number, private authDir: string) {}
+  constructor(
+    private port: number,
+    private host: string,
+    private authDir: string,
+    private bridgeToken: string = '',
+  ) {}
 
   async start(): Promise<void> {
     // Create WebSocket server
-    this.wss = new WebSocketServer({ port: this.port });
-    console.log(`🌉 Bridge server listening on ws://localhost:${this.port}`);
+    this.wss = new WebSocketServer({ host: this.host, port: this.port });
+    console.log(`🌉 Bridge server listening on ws://${this.host}:${this.port}`);
+    if (!this.bridgeToken) {
+      console.warn('⚠️  BRIDGE_TOKEN not set; websocket clients are unauthenticated');
+    }
 
     // Initialize WhatsApp client
     this.wa = new WhatsAppClient({
@@ -37,7 +45,19 @@ export class BridgeServer {
     });
 
     // Handle WebSocket connections
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      if (this.bridgeToken) {
+        const host = req.headers.host || `${this.host}:${this.port}`;
+        const requestUrl = new URL(req.url || '/', `ws://${host}`);
+        const queryToken = requestUrl.searchParams.get('token') || '';
+        const headerToken = String(req.headers['x-bridge-token'] || '');
+        const provided = queryToken || headerToken;
+        if (provided !== this.bridgeToken) {
+          ws.close(1008, 'unauthorized');
+          return;
+        }
+      }
+
       console.log('🔗 Python client connected');
       this.clients.add(ws);
 

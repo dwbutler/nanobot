@@ -3,6 +3,7 @@
 import asyncio
 import json
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from loguru import logger
 
@@ -33,8 +34,15 @@ class WhatsAppChannel(BaseChannel):
         import websockets
         
         bridge_url = self.config.bridge_url
+        log_bridge_url = bridge_url
+        if self.config.bridge_token:
+            parsed = urlparse(bridge_url)
+            query = dict(parse_qsl(parsed.query))
+            query["token"] = self.config.bridge_token
+            bridge_url = urlunparse(parsed._replace(query=urlencode(query)))
+            log_bridge_url = urlunparse(parsed._replace(query="token=***"))
         
-        logger.info(f"Connecting to WhatsApp bridge at {bridge_url}...")
+        logger.info(f"Connecting to WhatsApp bridge at {log_bridge_url}...")
         
         self._running = True
         

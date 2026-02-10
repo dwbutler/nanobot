@@ -84,12 +84,15 @@ class AgentLoop:
         self.tools.register(EditFileTool(allowed_dir=allowed_dir))
         self.tools.register(ListDirTool(allowed_dir=allowed_dir))
         
-        # Shell tool
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-        ))
+        # Shell tool (opt-in, disabled by default for safety)
+        if self.exec_config.enabled:
+            self.tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                deny_patterns=self.exec_config.deny_patterns,
+                allow_patterns=self.exec_config.allow_patterns,
+                restrict_to_workspace=self.restrict_to_workspace,
+            ))
         
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))

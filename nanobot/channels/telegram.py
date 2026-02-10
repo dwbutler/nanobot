@@ -220,6 +220,12 @@ class TelegramChannel(BaseChannel):
             return
         
         user = update.effective_user
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
+        if not self.is_allowed(sender_id):
+            return
+
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
@@ -229,6 +235,13 @@ class TelegramChannel(BaseChannel):
     async def _on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reset command — clear conversation history."""
         if not update.message or not update.effective_user:
+            return
+
+        user = update.effective_user
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
+        if not self.is_allowed(sender_id):
             return
         
         chat_id = str(update.message.chat_id)
@@ -249,7 +262,14 @@ class TelegramChannel(BaseChannel):
     
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command — show available commands."""
-        if not update.message:
+        if not update.message or not update.effective_user:
+            return
+
+        user = update.effective_user
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
+        if not self.is_allowed(sender_id):
             return
         
         help_text = (
@@ -274,6 +294,14 @@ class TelegramChannel(BaseChannel):
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
+
+        # Access control check before any heavy processing (media download/transcription).
+        if not self.is_allowed(sender_id):
+            logger.warning(
+                f"Access denied for sender {sender_id} on channel {self.name}. "
+                f"Add them to allowFrom list (or set allowAll=true) in config to grant access."
+            )
+            return
         
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id

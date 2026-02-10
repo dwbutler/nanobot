@@ -1,11 +1,13 @@
 """Web tools: web_search and web_fetch."""
 
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -31,16 +33,75 @@ def _normalize(text: str) -> str:
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
-    """Validate URL: must be http(s) with valid domain."""
+    """Validate URL and block local/private destinations to reduce SSRF risk."""
     try:
         p = urlparse(url)
         if p.scheme not in ('http', 'https'):
             return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
         if not p.netloc:
             return False, "Missing domain"
+        if p.username or p.password:
+            return False, "Userinfo in URL is not allowed"
+
+        host = p.hostname
+        if not host:
+            return False, "Missing hostname"
+
+        host_lower = host.lower().strip(".")
+        if host_lower in {"localhost", "localhost.localdomain"}:
+            return False, "Localhost is not allowed"
+
+        if host_lower.endswith(".local") or host_lower.endswith(".internal"):
+            return False, "Local/internal domains are not allowed"
+
+        # Block direct IP literals and DNS resolutions to private/local ranges.
+        try:
+            literal_ip = ipaddress.ip_address(host_lower)
+            if _is_forbidden_ip(literal_ip):
+                return False, f"Blocked IP address: {literal_ip}"
+        except ValueError:
+            pass
+
+        try:
+            infos = socket.getaddrinfo(
+                host,
+                p.port or (443 if p.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        except socket.gaierror as e:
+            return False, f"DNS resolution failed: {e}"
+
+        if not infos:
+            return False, "DNS resolution returned no addresses"
+
+        for info in infos:
+            sockaddr = info[4]
+            if not sockaddr:
+                continue
+            try:
+                resolved_ip = ipaddress.ip_address(sockaddr[0])
+            except ValueError:
+                continue
+            if _is_forbidden_ip(resolved_ip):
+                return False, f"Blocked resolved IP: {resolved_ip}"
+
         return True, ""
     except Exception as e:
         return False, str(e)
+
+
+def _is_forbidden_ip(ip: Any) -> bool:
+    """Return True for destinations that should never be fetched."""
+    return any(
+        [
+            ip.is_private,
+            ip.is_loopback,
+            ip.is_link_local,
+            ip.is_multicast,
+            ip.is_reserved,
+            ip.is_unspecified,
+        ]
+    )
 
 
 class WebSearchTool(Tool):
@@ -113,18 +174,36 @@ class WebFetchTool(Tool):
 
         max_chars = maxChars or self.max_chars
 
-        # Validate URL before fetching
-        is_valid, error_msg = _validate_url(url)
-        if not is_valid:
-            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url})
-
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True,
-                max_redirects=MAX_REDIRECTS,
+                follow_redirects=False,
                 timeout=30.0
             ) as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                current_url = url
+                r: httpx.Response | None = None
+
+                for _ in range(MAX_REDIRECTS + 1):
+                    is_valid, error_msg = _validate_url(current_url)
+                    if not is_valid:
+                        return json.dumps({"error": f"URL validation failed: {error_msg}", "url": current_url})
+
+                    r = await client.get(current_url, headers={"User-Agent": USER_AGENT})
+
+                    if r.status_code in (301, 302, 303, 307, 308):
+                        location = r.headers.get("location")
+                        if not location:
+                            return json.dumps({"error": "Redirect missing Location header", "url": current_url})
+                        current_url = urljoin(str(r.url), location)
+                        continue
+
+                    break
+
+                if r is None:
+                    return json.dumps({"error": "No response returned", "url": url})
+
+                if r.status_code in (301, 302, 303, 307, 308):
+                    return json.dumps({"error": f"Too many redirects (> {MAX_REDIRECTS})", "url": url})
+
                 r.raise_for_status()
             
             ctype = r.headers.get("content-type", "")

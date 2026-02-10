@@ -258,6 +258,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "socket_path": "/socket.io",
       "claw_token": "claw_xxx",
       "agent_user_id": "6982abcdef",
+      "allowFrom": ["OWNER_USER_ID"],
       "sessions": ["*"],
       "panels": ["*"],
       "reply_delay_mode": "non-mention",
@@ -336,11 +337,15 @@ nanobot channels login
   "channels": {
     "whatsapp": {
       "enabled": true,
+      "bridgeToken": "CHANGE_ME_RANDOM_SECRET",
       "allowFrom": ["+1234567890"]
     }
   }
 }
 ```
+
+> Set `bridgeToken` to authenticate the local bridge websocket.  
+> `nanobot channels login` will pass it automatically to the bridge process.
 
 **3. Run** (two terminals)
 
@@ -379,14 +384,15 @@ Uses **WebSocket** long connection — no public IP required.
       "appSecret": "xxx",
       "encryptKey": "",
       "verificationToken": "",
-      "allowFrom": []
+      "allowFrom": ["ou_xxx"]
     }
   }
 }
 ```
 
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
+> `allowFrom`: Add specific user open_ids (recommended).  
+> If you intentionally want public access, set `"allowAll": true`.
 
 **3. Run**
 
@@ -416,7 +422,8 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 
 **3. Configure**
 
-> - `allowFrom`: Leave empty for public access, or add user openids to restrict. You can find openids in the nanobot logs when a user messages the bot.
+> - `allowFrom`: Add user openids to restrict access. You can find openids in the nanobot logs when a user messages the bot.
+> - If you intentionally want public access, set `"allowAll": true`.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
@@ -426,7 +433,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["USER_OPENID"]
     }
   }
 }
@@ -465,13 +472,14 @@ Uses **Stream Mode** — no public IP required.
       "enabled": true,
       "clientId": "YOUR_APP_KEY",
       "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["staffId"]
     }
   }
 }
 ```
 
-> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+> `allowFrom`: Add staff IDs to restrict access.  
+> If you intentionally want public access, set `"allowAll": true`.
 
 **3. Run**
 
@@ -506,7 +514,12 @@ Uses **Socket Mode** — no public URL required.
       "enabled": true,
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
-      "groupPolicy": "mention"
+      "groupPolicy": "allowlist",
+      "groupAllowFrom": ["C0123456789"],
+      "dm": {
+        "policy": "allowlist",
+        "allowFrom": ["U0123456789"]
+      }
     }
   }
 }
@@ -521,8 +534,9 @@ nanobot gateway
 DM the bot directly or @mention it in a channel — it should respond!
 
 > [!TIP]
-> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels).
-> - DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
+> - `groupPolicy`: `"allowlist"` (default), `"mention"` (respond when @mentioned), or `"open"` (respond to all channel messages).
+> - For `"allowlist"` policy, set `groupAllowFrom` channel IDs.
+> - For DMs, set `dm.policy` and `dm.allowFrom` explicitly (or set `dm.allowAll: true` for public DM access).
 
 </details>
 
@@ -539,7 +553,8 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 **2. Configure**
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific senders.
+> - `allowFrom`: Add allowed sender email addresses.
+> - If you intentionally want public access, set `"allowAll": true`.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 
@@ -646,12 +661,15 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 
 ### Security
 
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> Secure defaults are enabled: workspace restriction is on and channels require explicit allowlists unless `allowAll=true` is set.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+| `tools.restrictToWorkspace` | `true` | Restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.enabled` | `false` | Shell execution is disabled by default. Set to `true` only if you trust inputs and runtime environment. |
+| `tools.exec.denyPatterns` | built-in denylist | Regex blacklist for shell commands. Defaults include privilege-escalation commands like `sudo`. |
+| `tools.exec.allowPatterns` | unset | Optional regex allowlist. If set, commands not matching are blocked. |
+| `channels.*.allowFrom` | `[]` (deny by default) | Whitelist of user IDs. Empty = deny unless `channels.*.allowAll=true`. |
 
 
 ## CLI Reference
@@ -690,7 +708,7 @@ nanobot cron remove <job_id>
 ## 🐳 Docker
 
 > [!TIP]
-> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The `-v ~/.nanobot:/home/nanobot/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
 
 Build and run nanobot in a container:
 
@@ -699,17 +717,17 @@ Build and run nanobot in a container:
 docker build -t nanobot .
 
 # Initialize config (first time only)
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
+docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
 ```
 
 ## 📁 Project Structure

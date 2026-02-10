@@ -1,7 +1,13 @@
 from typing import Any
+from pathlib import Path
+
+import pytest
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.filesystem import _resolve_path
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.web import _validate_url
 
 
 class SampleTool(Tool):
@@ -86,3 +92,75 @@ async def test_registry_returns_validation_error() -> None:
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+def test_filesystem_blocks_prefix_bypass(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    sibling = tmp_path / "workspace_evil"
+    workspace.mkdir()
+    sibling.mkdir()
+
+    inside = workspace / "safe.txt"
+    outside = sibling / "escape.txt"
+
+    assert _resolve_path(str(inside), workspace) == inside.resolve()
+
+    with pytest.raises(PermissionError):
+        _resolve_path(str(outside), workspace)
+
+
+@pytest.mark.asyncio
+async def test_exec_blocks_outside_working_dir_when_restricted(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=1)
+    result = await tool.execute("pwd", working_dir=str(outside))
+    assert "working_dir outside workspace" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_blocks_absolute_paths_outside_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=1)
+    result = await tool.execute("cat /etc/passwd")
+    assert "path outside workspace" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_blocks_sudo_by_default(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), timeout=1)
+    result = await tool.execute("sudo ls")
+    assert "dangerous pattern" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_allow_patterns_enforced(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    tool = ExecTool(
+        working_dir=str(workspace),
+        timeout=1,
+        allow_patterns=[r"^echo\b"],
+    )
+    result = await tool.execute("ls")
+    assert "not in allowlist" in result
+
+
+def test_web_validate_blocks_local_and_private_urls() -> None:
+    ok, _ = _validate_url("https://127.0.0.1")
+    assert ok is False
+
+    ok, _ = _validate_url("http://localhost")
+    assert ok is False
+
+    ok, _ = _validate_url("http://169.254.169.254/latest/meta-data")
+    assert ok is False

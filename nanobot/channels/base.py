@@ -69,10 +69,15 @@ class BaseChannel(ABC):
             True if allowed, False otherwise.
         """
         allow_list = getattr(self.config, "allow_from", [])
+        allow_all = bool(getattr(self.config, "allow_all", False))
         
-        # If no allow list, allow everyone
-        if not allow_list:
+        # Explicitly-open mode for public bots.
+        if allow_all:
             return True
+
+        # Deny by default when no allowlist is configured.
+        if not allow_list:
+            return False
         
         sender_str = str(sender_id)
         if sender_str in allow_list:
@@ -106,7 +111,7 @@ class BaseChannel(ABC):
         if not self.is_allowed(sender_id):
             logger.warning(
                 f"Access denied for sender {sender_id} on channel {self.name}. "
-                f"Add them to allowFrom list in config to grant access."
+                f"Add them to allowFrom list (or set allowAll=true) in config to grant access."
             )
             return
         

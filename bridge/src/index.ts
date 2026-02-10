@@ -10,7 +10,7 @@
  *   npm run build && npm start
  *   
  * Or with custom settings:
- *   BRIDGE_PORT=3001 AUTH_DIR=~/.nanobot/whatsapp npm start
+ *   BRIDGE_PORT=3001 BRIDGE_HOST=127.0.0.1 BRIDGE_TOKEN=secret AUTH_DIR=~/.nanobot/whatsapp npm start
  */
 
 // Polyfill crypto for Baileys in ESM
@@ -24,12 +24,19 @@ import { homedir } from 'os';
 import { join } from 'path';
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
+const HOST = process.env.BRIDGE_HOST || '127.0.0.1';
+const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || '';
 const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.nanobot', 'whatsapp-auth');
 
 console.log('🐈 nanobot WhatsApp Bridge');
 console.log('========================\n');
 
-const server = new BridgeServer(PORT, AUTH_DIR);
+if (!BRIDGE_TOKEN && HOST !== '127.0.0.1' && HOST !== 'localhost') {
+  console.error('BRIDGE_TOKEN is required when BRIDGE_HOST is not loopback');
+  process.exit(1);
+}
+
+const server = new BridgeServer(PORT, HOST, AUTH_DIR, BRIDGE_TOKEN);
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {

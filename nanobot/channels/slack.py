@@ -28,6 +28,13 @@ class SlackChannel(BaseChannel):
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
 
+    def is_allowed(self, sender_id: str) -> bool:
+        """
+        Slack enforces access in `_is_allowed` with channel context
+        (DM vs group + policy), so the base sender-only check is bypassed.
+        """
+        return True
+
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
         if not self.config.bot_token or not self.config.app_token:
@@ -181,12 +188,12 @@ class SlackChannel(BaseChannel):
                 return False
             if self.config.dm.policy == "allowlist":
                 return sender_id in self.config.dm.allow_from
-            return True
+            return self.config.dm.allow_all or sender_id in self.config.dm.allow_from
 
         # Group / channel messages
         if self.config.group_policy == "allowlist":
             return chat_id in self.config.group_allow_from
-        return True
+        return self.config.group_allow_all or chat_id in self.config.group_allow_from
 
     def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
         if self.config.group_policy == "open":
